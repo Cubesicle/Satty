@@ -538,11 +538,26 @@ impl FemtoVgAreaMut {
         canvas: &mut femtovg::Canvas<femtovg::renderer::OpenGl>,
         onscreen: bool,
     ) -> Result<()> {
+        let should_be_nearest = self.scale_factor >= 4.0;
+
         let background_image_id = match self.background_image_id {
-            Some(id) => id,
-            None => {
-                let id = Self::upload_background_image(canvas, &self.background_image)?;
-                self.background_image_id.replace(id);
+            Some(id)
+                // keep the original image if the resampling method doesn't need to be changed,
+                // otherwise reupload the image with nearest-neighbor interpolation
+                // when past the zoom threshold
+                if canvas.image_info(id).is_ok_and(|info| {
+                    info.flags().contains(ImageFlags::NEAREST) == should_be_nearest
+                }) =>
+            {
+                id
+            }
+            _ => {
+                let id = Self::upload_background_image(
+                    canvas,
+                    &self.background_image,
+                    should_be_nearest,
+                )?;
+                self.background_image_id = Some(id);
                 id
             }
         };
@@ -594,6 +609,7 @@ impl FemtoVgAreaMut {
     fn upload_background_image(
         canvas: &mut femtovg::Canvas<femtovg::renderer::OpenGl>,
         image: &Pixbuf,
+        nearest_neighbor: bool,
     ) -> Result<ImageId> {
         let format = if image.has_alpha() {
             PixelFormat::Rgba8
@@ -605,7 +621,11 @@ impl FemtoVgAreaMut {
             image.width() as usize,
             image.height() as usize,
             format,
-            ImageFlags::empty(),
+            if nearest_neighbor {
+                ImageFlags::NEAREST
+            } else {
+                ImageFlags::empty()
+            },
         )?;
 
         // extract values
